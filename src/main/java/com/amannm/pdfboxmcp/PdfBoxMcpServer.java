@@ -3,7 +3,13 @@ package com.amannm.pdfboxmcp;
 import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpServerFeatures;
 import io.modelcontextprotocol.server.transport.StdioServerTransportProvider;
+import io.modelcontextprotocol.spec.McpServerSession;
+import io.modelcontextprotocol.spec.McpServerTransport;
+import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import io.modelcontextprotocol.spec.McpSchema.Implementation;
+import io.modelcontextprotocol.spec.McpSchema.InitializeResult;
+import io.modelcontextprotocol.spec.McpSchema.ListToolsResult;
 import io.modelcontextprotocol.spec.McpSchema.ServerCapabilities;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
@@ -20,6 +26,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import reactor.core.publisher.Mono;
 
 import java.io.File;
+import java.time.Duration;
 import java.util.Calendar;
 import java.util.List;
 import java.util.Map;
@@ -56,7 +63,73 @@ public class PdfBoxMcpServer {
             )
             .build();
     }
+        
+        transport.setSessionFactory(new McpServerSession.Factory() {
+            @Override
+            public McpServerSession create(McpServerTransport serverTransport) {
+                return new McpServerSession(
+                    "pdfbox-mcp-session",
+                    Duration.ofMinutes(5),
+                    serverTransport,
+                    createInitRequestHandler(),
+                    createInitNotificationHandler(),
+                    createRequestHandlers(),
+                    Map.of()
+                );
+            }
+        });
+        
+        // Keep the server running by blocking on a never-completing mono
+        Mono.never().block();
+    }
     
+    private static McpServerSession.InitRequestHandler createInitRequestHandler() {
+        return request -> {
+            ServerCapabilities capabilities = new ServerCapabilities(
+                null, null, null, null, null,
+                new ServerCapabilities.ToolCapabilities(true)
+            );
+
+            Implementation impl = new Implementation("pdfbox-mcp", "1.0.0");
+
+            InitializeResult result = new InitializeResult(
+                "1.0", capabilities, impl, "Ready"
+            );
+
+            return Mono.just(result);
+        };
+    }
+    
+    private static McpServerSession.InitNotificationHandler createInitNotificationHandler() {
+        return Mono::empty;
+    }
+    
+    private static Map<String, McpServerSession.RequestHandler<?>> createRequestHandlers() {
+        McpServerSession.RequestHandler<ListToolsResult> listHandler = (exchange, params) -> {
+            ListToolsResult result = new ListToolsResult(
+                List.of(
+                    createExtractTextTool(),
+                    createGetMetadataTool(),
+                    createGetPageCountTool()
+                ),
+                null
+            );
+            return Mono.just(result);
+        };
+
+        McpServerSession.RequestHandler<CallToolResult> callHandler = (exchange, params) -> {
+            try {
+                CallToolRequest request = objectMapper.convertValue(params, CallToolRequest.class);
+                return handleToolCall(request);
+            } catch (Exception e) {
+                return Mono.just(createErrorResult("Error parsing tool call: " + e.getMessage()));
+            }
+        };
+        return Map.of(
+            "tools/list", listHandler,
+            "tools/call", callHandler
+        );
+    }
     
     private static Tool createExtractTextTool() {
         Map<String, Object> properties = Map.of(
@@ -88,7 +161,6 @@ public class PdfBoxMcpServer {
     private static Tool createGetPageCountTool() {
         return createFileTool("get_page_count", "Get the number of pages in a PDF file");
     }
-    
     
     static Mono<CallToolResult> handleExtractText(Map<String, Object> arguments) {
         try {
