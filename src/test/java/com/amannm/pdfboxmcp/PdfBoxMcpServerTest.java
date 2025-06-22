@@ -8,29 +8,31 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import java.io.File;
 import java.util.Map;
 
+import com.amannm.pdfboxmcp.PageRange;
+
 
 public class PdfBoxMcpServerTest {
     @Test
     void testParsePageRangeSingle() {
-        var result = PdfBoxMcpServer.parsePageRange("3");
+        var result = PageRange.parse("3");
         assertTrue(result.isPresent());
         assertEquals(new PageRange(3, 3), result.get());
     }
 
     @Test
     void testParsePageRangeRange() {
-        var result = PdfBoxMcpServer.parsePageRange("2-5");
+        var result = PageRange.parse("2-5");
         assertTrue(result.isPresent());
         assertEquals(new PageRange(2, 5), result.get());
     }
 
     @Test
     void testParsePageRangeInvalid() {
-        assertTrue(PdfBoxMcpServer.parsePageRange("abc").isEmpty());
-        assertTrue(PdfBoxMcpServer.parsePageRange("3-").isEmpty());
-        assertTrue(PdfBoxMcpServer.parsePageRange("").isEmpty());
-        assertTrue(PdfBoxMcpServer.parsePageRange("5-3").isEmpty());
-        assertTrue(PdfBoxMcpServer.parsePageRange("0").isEmpty());
+        assertTrue(PageRange.parse("abc").isEmpty());
+        assertTrue(PageRange.parse("3-").isEmpty());
+        assertTrue(PageRange.parse("").isEmpty());
+        assertTrue(PageRange.parse("5-3").isEmpty());
+        assertTrue(PageRange.parse("0").isEmpty());
     }
 
     @Test

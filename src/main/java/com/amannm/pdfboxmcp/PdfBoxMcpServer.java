@@ -173,49 +173,55 @@ public class PdfBoxMcpServer {
             return Mono.just(createErrorResult("Error executing tool: " + e.getMessage()));
         }
     }
+
+    /**
+     * Utility to open a PDF document, returning a result from the provided processor.
+     */
+    private static Mono<CallToolResult> withDocument(String filePath,
+            java.util.function.Function<PDDocument, CallToolResult> processor) {
+        File pdfFile = new File(filePath);
+        if (!pdfFile.exists()) {
+            return Mono.just(createErrorResult("File not found: " + filePath));
+        }
+        try (PDDocument document = Loader.loadPDF(pdfFile)) {
+            return Mono.just(processor.apply(document));
+        } catch (Exception e) {
+            return Mono.just(createErrorResult("Error processing file: " + e.getMessage()));
+        }
+    }
     
     static Mono<CallToolResult> handleExtractText(Map<String, Object> arguments) {
-        try {
-            String filePath = String.valueOf(arguments.get("file_path"));
-            String pageRange = arguments.containsKey("page_range")
-                ? String.valueOf(arguments.get("page_range"))
-                : "all";
-            
-            File pdfFile = new File(filePath);
-            if (!pdfFile.exists()) {
-                return Mono.just(createErrorResult("File not found: " + filePath));
-            }
-            
-            try (PDDocument document = Loader.loadPDF(pdfFile)) {
+        String filePath = String.valueOf(arguments.get("file_path"));
+        String pageRange = arguments.containsKey("page_range")
+            ? String.valueOf(arguments.get("page_range"))
+            : "all";
+
+        return withDocument(filePath, document -> {
+            try {
                 PDFTextStripper pdfStripper = new PDFTextStripper();
 
                 if (!"all".equals(pageRange)) {
-                    java.util.Optional<PageRange> range = parsePageRange(pageRange);
+                    java.util.Optional<PageRange> range = PageRange.parse(pageRange);
                     if (range.isEmpty()) {
-                        return Mono.just(createErrorResult("Invalid page range: " + pageRange));
+                        return createErrorResult("Invalid page range: " + pageRange);
                     }
                     pdfStripper.setStartPage(range.get().start());
                     pdfStripper.setEndPage(range.get().end());
                 }
-                
+
                 String text = pdfStripper.getText(document);
-                return Mono.just(createTextResult(text));
+                return createTextResult(text);
+            } catch (Exception e) {
+                return createErrorResult("Error extracting text: " + e.getMessage());
             }
-        } catch (Exception e) {
-            return Mono.just(createErrorResult("Error extracting text: " + e.getMessage()));
-        }
+        });
     }
     
     private static Mono<CallToolResult> handleGetMetadata(Map<String, Object> arguments) {
-        try {
-            String filePath = String.valueOf(arguments.get("file_path"));
-            
-            File pdfFile = new File(filePath);
-            if (!pdfFile.exists()) {
-                return Mono.just(createErrorResult("File not found: " + filePath));
-            }
-            
-            try (PDDocument document = Loader.loadPDF(pdfFile)) {
+        String filePath = String.valueOf(arguments.get("file_path"));
+
+        return withDocument(filePath, document -> {
+            try {
                 PDDocumentInformation info = document.getDocumentInformation();
 
                 Calendar creationDate = info.getCreationDate();
@@ -236,64 +242,26 @@ public class PdfBoxMcpServer {
                 String json = objectMapper
                     .writerWithDefaultPrettyPrinter()
                     .writeValueAsString(metadata);
-                return Mono.just(createTextResult(json));
+                return createTextResult(json);
+            } catch (Exception e) {
+                return createErrorResult("Error extracting metadata: " + e.getMessage());
             }
-        } catch (Exception e) {
-            return Mono.just(createErrorResult("Error extracting metadata: " + e.getMessage()));
-        }
+        });
     }
     
     private static Mono<CallToolResult> handleGetPageCount(Map<String, Object> arguments) {
-        try {
-            String filePath = String.valueOf(arguments.get("file_path"));
-            
-            File pdfFile = new File(filePath);
-            if (!pdfFile.exists()) {
-                return Mono.just(createErrorResult("File not found: " + filePath));
-            }
-            
-            try (PDDocument document = Loader.loadPDF(pdfFile)) {
+        String filePath = String.valueOf(arguments.get("file_path"));
+
+        return withDocument(filePath, document -> {
+            try {
                 int pageCount = document.getNumberOfPages();
-                return Mono.just(createTextResult("Page count: " + pageCount));
+                return createTextResult("Page count: " + pageCount);
+            } catch (Exception e) {
+                return createErrorResult("Error getting page count: " + e.getMessage());
             }
-        } catch (Exception e) {
-            return Mono.just(createErrorResult("Error getting page count: " + e.getMessage()));
-        }
+        });
     }
 
-    /**
-     * Parse a page range string like "3" or "2-5".
-     *
-     * @param pageRange the range expression
-     * @return an Optional containing the parsed {@link PageRange} or empty if invalid
-     */
-    static java.util.Optional<PageRange> parsePageRange(String pageRange) {
-        if (pageRange == null || pageRange.isBlank()) {
-            return java.util.Optional.empty();
-        }
-        String[] parts = pageRange.split("-", -1);
-        try {
-            if (parts.length == 1) {
-                int page = Integer.parseInt(parts[0]);
-                if (page < 1) {
-                    return java.util.Optional.empty();
-                }
-                return java.util.Optional.of(new PageRange(page, page));
-            }
-            if (parts.length == 2 && !parts[0].isBlank() && !parts[1].isBlank()) {
-                int start = Integer.parseInt(parts[0]);
-                int end = Integer.parseInt(parts[1]);
-                if (start < 1 || end < start) {
-                    return java.util.Optional.empty();
-                }
-                return java.util.Optional.of(new PageRange(start, end));
-            }
-        } catch (NumberFormatException e) {
-            return java.util.Optional.empty();
-        }
-        return java.util.Optional.empty();
-    }
-    
     static CallToolResult createTextResult(String text) {
         TextContent content = new TextContent(text);
         return new CallToolResult(List.of(content), false);
