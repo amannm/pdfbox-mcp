@@ -62,7 +62,6 @@ public class PdfBoxMcpServer {
                 )
             )
             .build();
-    }
         
         transport.setSessionFactory(new McpServerSession.Factory() {
             @Override
@@ -160,6 +159,19 @@ public class PdfBoxMcpServer {
 
     private static Tool createGetPageCountTool() {
         return createFileTool("get_page_count", "Get the number of pages in a PDF file");
+    }
+
+    private static Mono<CallToolResult> handleToolCall(CallToolRequest request) {
+        try {
+            return switch (request.name()) {
+                case "extract_text" -> handleExtractText(request.arguments());
+                case "get_metadata" -> handleGetMetadata(request.arguments());
+                case "get_page_count" -> handleGetPageCount(request.arguments());
+                default -> Mono.just(createErrorResult("Unknown tool: " + request.name()));
+            };
+        } catch (Exception e) {
+            return Mono.just(createErrorResult("Error executing tool: " + e.getMessage()));
+        }
     }
     
     static Mono<CallToolResult> handleExtractText(Map<String, Object> arguments) {
