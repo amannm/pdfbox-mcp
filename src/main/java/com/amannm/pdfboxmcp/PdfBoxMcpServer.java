@@ -6,7 +6,6 @@ import io.modelcontextprotocol.spec.McpServerTransport;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.Implementation;
-import io.modelcontextprotocol.spec.McpSchema.InitializeRequest;
 import io.modelcontextprotocol.spec.McpSchema.InitializeResult;
 import io.modelcontextprotocol.spec.McpSchema.ListToolsResult;
 import io.modelcontextprotocol.spec.McpSchema.ServerCapabilities;
@@ -51,30 +50,30 @@ public class PdfBoxMcpServer {
                 );
             }
         });
+        
+        // Keep the server running by blocking on a never-completing mono
+        Mono.never().block();
     }
     
     private static McpServerSession.InitRequestHandler createInitRequestHandler() {
-        return new McpServerSession.InitRequestHandler() {
-            @Override
-            public Mono<InitializeResult> handle(InitializeRequest request) {
-                ServerCapabilities capabilities = new ServerCapabilities(
-                    null, null, null, null, null, 
-                    new ServerCapabilities.ToolCapabilities(true)
-                );
-                
-                Implementation impl = new Implementation("pdfbox-mcp", "1.0.0");
-                
-                InitializeResult result = new InitializeResult(
-                    "1.0", capabilities, impl, "Ready"
-                );
-                
-                return Mono.just(result);
-            }
+        return request -> {
+            ServerCapabilities capabilities = new ServerCapabilities(
+                null, null, null, null, null,
+                new ServerCapabilities.ToolCapabilities(true)
+            );
+
+            Implementation impl = new Implementation("pdfbox-mcp", "1.0.0");
+
+            InitializeResult result = new InitializeResult(
+                "1.0", capabilities, impl, "Ready"
+            );
+
+            return Mono.just(result);
         };
     }
     
     private static McpServerSession.InitNotificationHandler createInitNotificationHandler() {
-        return () -> Mono.empty();
+        return Mono::empty;
     }
     
     private static Map<String, McpServerSession.RequestHandler<?>> createRequestHandlers() {
@@ -137,16 +136,12 @@ public class PdfBoxMcpServer {
     
     private static Mono<CallToolResult> handleToolCall(CallToolRequest request) {
         try {
-            switch (request.name()) {
-                case "extract_text":
-                    return handleExtractText(request.arguments());
-                case "get_metadata":
-                    return handleGetMetadata(request.arguments());
-                case "get_page_count":
-                    return handleGetPageCount(request.arguments());
-                default:
-                    return Mono.just(createErrorResult("Unknown tool: " + request.name()));
-            }
+            return switch (request.name()) {
+                case "extract_text" -> handleExtractText(request.arguments());
+                case "get_metadata" -> handleGetMetadata(request.arguments());
+                case "get_page_count" -> handleGetPageCount(request.arguments());
+                default -> Mono.just(createErrorResult("Unknown tool: " + request.name()));
+            };
         } catch (Exception e) {
             return Mono.just(createErrorResult("Error executing tool: " + e.getMessage()));
         }
