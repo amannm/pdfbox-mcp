@@ -1,26 +1,26 @@
 package com.amannm.pdfboxmcp;
 
+import io.modelcontextprotocol.server.McpServer;
+import io.modelcontextprotocol.server.McpServerFeatures;
 import io.modelcontextprotocol.server.transport.StdioServerTransportProvider;
-import io.modelcontextprotocol.spec.*;
-import io.modelcontextprotocol.spec.McpSchema.*;
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import io.modelcontextprotocol.spec.McpSchema.ServerCapabilities;
+import io.modelcontextprotocol.spec.McpSchema.TextContent;
+import io.modelcontextprotocol.spec.McpSchema.Tool;
+import io.modelcontextprotocol.spec.McpSchema;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentInformation;
 import org.apache.pdfbox.text.PDFTextStripper;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+
 
 import reactor.core.publisher.Mono;
 
 import java.io.File;
-import java.io.IOException;
-import java.time.Duration;
 import java.util.Calendar;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -30,154 +30,72 @@ public class PdfBoxMcpServer {
     
     public static void main(String[] args) {
         StdioServerTransportProvider transport = new StdioServerTransportProvider();
-        
-        transport.setSessionFactory(new McpServerSession.Factory() {
-            @Override
-            public McpServerSession create(McpServerTransport serverTransport) {
-                return new McpServerSession(
-                    "pdfbox-mcp-session",
-                    Duration.ofMinutes(5),
-                    serverTransport,
-                    createInitRequestHandler(),
-                    createInitNotificationHandler(),
-                    createRequestHandlers(),
-                    Map.of()
-                );
-            }
-        });
+
+        ServerCapabilities capabilities = new ServerCapabilities(
+            null, null, null, null, null,
+            new ServerCapabilities.ToolCapabilities(true)
+        );
+
+        McpServer.sync(transport)
+            .objectMapper(objectMapper)
+            .serverInfo("pdfbox-mcp", "1.0.0")
+            .capabilities(capabilities)
+            .tools(
+                new McpServerFeatures.SyncToolSpecification(
+                    createExtractTextTool(),
+                    (exchange, params) -> handleExtractText(params).block()
+                ),
+                new McpServerFeatures.SyncToolSpecification(
+                    createGetMetadataTool(),
+                    (exchange, params) -> handleGetMetadata(params).block()
+                ),
+                new McpServerFeatures.SyncToolSpecification(
+                    createGetPageCountTool(),
+                    (exchange, params) -> handleGetPageCount(params).block()
+                )
+            )
+            .build();
     }
     
-    private static McpServerSession.InitRequestHandler createInitRequestHandler() {
-        return new McpServerSession.InitRequestHandler() {
-            @Override
-            public Mono<InitializeResult> handle(InitializeRequest request) {
-                ServerCapabilities capabilities = new ServerCapabilities(
-                    null, null, null, null, null, 
-                    new ServerCapabilities.ToolCapabilities(true)
-                );
-                
-                Implementation impl = new Implementation("pdfbox-mcp", "1.0.0");
-                
-                InitializeResult result = new InitializeResult(
-                    "1.0", capabilities, impl, "Ready"
-                );
-                
-                return Mono.just(result);
-            }
-        };
-    }
-    
-    private static McpServerSession.InitNotificationHandler createInitNotificationHandler() {
-        return () -> Mono.empty();
-    }
-    
-    private static Map<String, McpServerSession.RequestHandler<?>> createRequestHandlers() {
-        Map<String, McpServerSession.RequestHandler<?>> handlers = new HashMap<>();
-        
-        handlers.put("tools/list", params -> {
-            ListToolsResult result = new ListToolsResult(List.of(
-                createExtractTextTool(),
-                createGetMetadataTool(),
-                createGetPageCountTool()
-            ));
-            return Mono.just(result);
-        });
-        
-        handlers.put("tools/call", params -> {
-            try {
-                CallToolRequest request = objectMapper.treeToValue(params, CallToolRequest.class);
-                return handleToolCall(request);
-            } catch (Exception e) {
-                return Mono.just(createErrorResult("Error parsing tool call: " + e.getMessage()));
-            }
-        });
-        
-        return handlers;
-    }
     
     private static Tool createExtractTextTool() {
-        ObjectNode schema = objectMapper.createObjectNode();
-        schema.put("type", "object");
-        
-        ObjectNode properties = objectMapper.createObjectNode();
-        ObjectNode filePathProp = objectMapper.createObjectNode();
-        filePathProp.put("type", "string");
-        filePathProp.put("description", "Path to the PDF file");
-        properties.set("file_path", filePathProp);
-        
-        ObjectNode pageRangeProp = objectMapper.createObjectNode();
-        pageRangeProp.put("type", "string");
-        pageRangeProp.put("description", "Page range (e.g., '1-5' or 'all')");
-        properties.set("page_range", pageRangeProp);
-        
-        schema.set("properties", properties);
-        
-        ArrayNode required = objectMapper.createArrayNode();
-        required.add("file_path");
-        schema.set("required", required);
-        
+        Map<String, Object> properties = Map.of(
+            "file_path", new SchemaProperty("string", "Path to the PDF file"),
+            "page_range", new SchemaProperty("string", "Page range (e.g., '1-5' or 'all')")
+        );
+        List<String> required = List.of("file_path");
+        McpSchema.JsonSchema schema = new McpSchema.JsonSchema(
+            "object", properties, required, null, null, null
+        );
         return new Tool("extract_text", "Extract text content from a PDF file", schema);
     }
-    
+
+    private static Tool createFileTool(String name, String description) {
+        Map<String, Object> properties = Map.of(
+            "file_path", new SchemaProperty("string", "Path to the PDF file")
+        );
+        List<String> required = List.of("file_path");
+        McpSchema.JsonSchema schema = new McpSchema.JsonSchema(
+            "object", properties, required, null, null, null
+        );
+        return new Tool(name, description, schema);
+    }
+
     private static Tool createGetMetadataTool() {
-        ObjectNode schema = objectMapper.createObjectNode();
-        schema.put("type", "object");
-        
-        ObjectNode properties = objectMapper.createObjectNode();
-        ObjectNode filePathProp = objectMapper.createObjectNode();
-        filePathProp.put("type", "string");
-        filePathProp.put("description", "Path to the PDF file");
-        properties.set("file_path", filePathProp);
-        
-        schema.set("properties", properties);
-        
-        ArrayNode required = objectMapper.createArrayNode();
-        required.add("file_path");
-        schema.set("required", required);
-        
-        return new Tool("get_metadata", "Extract metadata from a PDF file", schema);
+        return createFileTool("get_metadata", "Extract metadata from a PDF file");
     }
-    
+
     private static Tool createGetPageCountTool() {
-        ObjectNode schema = objectMapper.createObjectNode();
-        schema.put("type", "object");
-        
-        ObjectNode properties = objectMapper.createObjectNode();
-        ObjectNode filePathProp = objectMapper.createObjectNode();
-        filePathProp.put("type", "string");
-        filePathProp.put("description", "Path to the PDF file");
-        properties.set("file_path", filePathProp);
-        
-        schema.set("properties", properties);
-        
-        ArrayNode required = objectMapper.createArrayNode();
-        required.add("file_path");
-        schema.set("required", required);
-        
-        return new Tool("get_page_count", "Get the number of pages in a PDF file", schema);
+        return createFileTool("get_page_count", "Get the number of pages in a PDF file");
     }
     
-    private static Mono<CallToolResult> handleToolCall(CallToolRequest request) {
-        try {
-            switch (request.name()) {
-                case "extract_text":
-                    return handleExtractText(request.arguments());
-                case "get_metadata":
-                    return handleGetMetadata(request.arguments());
-                case "get_page_count":
-                    return handleGetPageCount(request.arguments());
-                default:
-                    return Mono.just(createErrorResult("Unknown tool: " + request.name()));
-            }
-        } catch (Exception e) {
-            return Mono.just(createErrorResult("Error executing tool: " + e.getMessage()));
-        }
-    }
     
-    private static Mono<CallToolResult> handleExtractText(JsonNode arguments) {
+    static Mono<CallToolResult> handleExtractText(Map<String, Object> arguments) {
         try {
-            String filePath = arguments.get("file_path").asText();
-            String pageRange = arguments.has("page_range") ? arguments.get("page_range").asText() : "all";
+            String filePath = String.valueOf(arguments.get("file_path"));
+            String pageRange = arguments.containsKey("page_range")
+                ? String.valueOf(arguments.get("page_range"))
+                : "all";
             
             File pdfFile = new File(filePath);
             if (!pdfFile.exists()) {
@@ -186,15 +104,14 @@ public class PdfBoxMcpServer {
             
             try (PDDocument document = Loader.loadPDF(pdfFile)) {
                 PDFTextStripper pdfStripper = new PDFTextStripper();
-                
+
                 if (!"all".equals(pageRange)) {
-                    String[] range = pageRange.split("-");
-                    if (range.length == 2) {
-                        int startPage = Integer.parseInt(range[0]);
-                        int endPage = Integer.parseInt(range[1]);
-                        pdfStripper.setStartPage(startPage);
-                        pdfStripper.setEndPage(endPage);
+                    java.util.Optional<PageRange> range = parsePageRange(pageRange);
+                    if (range.isEmpty()) {
+                        return Mono.just(createErrorResult("Invalid page range: " + pageRange));
                     }
+                    pdfStripper.setStartPage(range.get().start());
+                    pdfStripper.setEndPage(range.get().end());
                 }
                 
                 String text = pdfStripper.getText(document);
@@ -205,9 +122,9 @@ public class PdfBoxMcpServer {
         }
     }
     
-    private static Mono<CallToolResult> handleGetMetadata(JsonNode arguments) {
+    private static Mono<CallToolResult> handleGetMetadata(Map<String, Object> arguments) {
         try {
-            String filePath = arguments.get("file_path").asText();
+            String filePath = String.valueOf(arguments.get("file_path"));
             
             File pdfFile = new File(filePath);
             if (!pdfFile.exists()) {
@@ -216,37 +133,35 @@ public class PdfBoxMcpServer {
             
             try (PDDocument document = Loader.loadPDF(pdfFile)) {
                 PDDocumentInformation info = document.getDocumentInformation();
-                
-                ObjectNode metadata = objectMapper.createObjectNode();
-                metadata.put("title", info.getTitle());
-                metadata.put("author", info.getAuthor());
-                metadata.put("subject", info.getSubject());
-                metadata.put("keywords", info.getKeywords());
-                metadata.put("creator", info.getCreator());
-                metadata.put("producer", info.getProducer());
-                
+
                 Calendar creationDate = info.getCreationDate();
-                if (creationDate != null) {
-                    metadata.put("creation_date", creationDate.getTime().toString());
-                }
-                
                 Calendar modificationDate = info.getModificationDate();
-                if (modificationDate != null) {
-                    metadata.put("modification_date", modificationDate.getTime().toString());
-                }
-                
-                metadata.put("page_count", document.getNumberOfPages());
-                
-                return Mono.just(createTextResult(metadata.toPrettyString()));
+
+                PdfMetadata metadata = new PdfMetadata(
+                    info.getTitle(),
+                    info.getAuthor(),
+                    info.getSubject(),
+                    info.getKeywords(),
+                    info.getCreator(),
+                    info.getProducer(),
+                    creationDate != null ? creationDate.getTime().toString() : null,
+                    modificationDate != null ? modificationDate.getTime().toString() : null,
+                    document.getNumberOfPages()
+                );
+
+                String json = objectMapper
+                    .writerWithDefaultPrettyPrinter()
+                    .writeValueAsString(metadata);
+                return Mono.just(createTextResult(json));
             }
         } catch (Exception e) {
             return Mono.just(createErrorResult("Error extracting metadata: " + e.getMessage()));
         }
     }
     
-    private static Mono<CallToolResult> handleGetPageCount(JsonNode arguments) {
+    private static Mono<CallToolResult> handleGetPageCount(Map<String, Object> arguments) {
         try {
-            String filePath = arguments.get("file_path").asText();
+            String filePath = String.valueOf(arguments.get("file_path"));
             
             File pdfFile = new File(filePath);
             if (!pdfFile.exists()) {
@@ -261,13 +176,46 @@ public class PdfBoxMcpServer {
             return Mono.just(createErrorResult("Error getting page count: " + e.getMessage()));
         }
     }
+
+    /**
+     * Parse a page range string like "3" or "2-5".
+     *
+     * @param pageRange the range expression
+     * @return an Optional containing the parsed {@link PageRange} or empty if invalid
+     */
+    static java.util.Optional<PageRange> parsePageRange(String pageRange) {
+        if (pageRange == null || pageRange.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        String[] parts = pageRange.split("-", -1);
+        try {
+            if (parts.length == 1) {
+                int page = Integer.parseInt(parts[0]);
+                if (page < 1) {
+                    return java.util.Optional.empty();
+                }
+                return java.util.Optional.of(new PageRange(page, page));
+            }
+            if (parts.length == 2 && !parts[0].isBlank() && !parts[1].isBlank()) {
+                int start = Integer.parseInt(parts[0]);
+                int end = Integer.parseInt(parts[1]);
+                if (start < 1 || end < start) {
+                    return java.util.Optional.empty();
+                }
+                return java.util.Optional.of(new PageRange(start, end));
+            }
+        } catch (NumberFormatException e) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.empty();
+    }
     
-    private static CallToolResult createTextResult(String text) {
+    static CallToolResult createTextResult(String text) {
         TextContent content = new TextContent(text);
         return new CallToolResult(List.of(content), false);
     }
     
-    private static CallToolResult createErrorResult(String error) {
+    static CallToolResult createErrorResult(String error) {
         TextContent content = new TextContent(error);
         return new CallToolResult(List.of(content), true);
     }
