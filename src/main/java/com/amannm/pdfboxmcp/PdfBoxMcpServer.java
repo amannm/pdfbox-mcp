@@ -1,5 +1,7 @@
 package com.amannm.pdfboxmcp;
 
+import io.modelcontextprotocol.server.McpServer;
+import io.modelcontextprotocol.server.McpServerFeatures;
 import io.modelcontextprotocol.server.transport.StdioServerTransportProvider;
 import io.modelcontextprotocol.spec.McpServerSession;
 import io.modelcontextprotocol.spec.McpServerTransport;
@@ -35,6 +37,32 @@ public class PdfBoxMcpServer {
     
     public static void main(String[] args) {
         StdioServerTransportProvider transport = new StdioServerTransportProvider();
+
+        ServerCapabilities capabilities = new ServerCapabilities(
+            null, null, null, null, null,
+            new ServerCapabilities.ToolCapabilities(true)
+        );
+
+        McpServer.sync(transport)
+            .objectMapper(objectMapper)
+            .serverInfo("pdfbox-mcp", "1.0.0")
+            .capabilities(capabilities)
+            .tools(
+                new McpServerFeatures.SyncToolSpecification(
+                    createExtractTextTool(),
+                    (exchange, params) -> handleExtractText(params).block()
+                ),
+                new McpServerFeatures.SyncToolSpecification(
+                    createGetMetadataTool(),
+                    (exchange, params) -> handleGetMetadata(params).block()
+                ),
+                new McpServerFeatures.SyncToolSpecification(
+                    createGetPageCountTool(),
+                    (exchange, params) -> handleGetPageCount(params).block()
+                )
+            )
+            .build();
+    }
         
         transport.setSessionFactory(new McpServerSession.Factory() {
             @Override
@@ -132,19 +160,6 @@ public class PdfBoxMcpServer {
 
     private static Tool createGetPageCountTool() {
         return createFileTool("get_page_count", "Get the number of pages in a PDF file");
-    }
-    
-    private static Mono<CallToolResult> handleToolCall(CallToolRequest request) {
-        try {
-            return switch (request.name()) {
-                case "extract_text" -> handleExtractText(request.arguments());
-                case "get_metadata" -> handleGetMetadata(request.arguments());
-                case "get_page_count" -> handleGetPageCount(request.arguments());
-                default -> Mono.just(createErrorResult("Unknown tool: " + request.name()));
-            };
-        } catch (Exception e) {
-            return Mono.just(createErrorResult("Error executing tool: " + e.getMessage()));
-        }
     }
     
     static Mono<CallToolResult> handleExtractText(Map<String, Object> arguments) {
