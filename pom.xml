@@ -32,6 +32,12 @@
             <version>5.10.0</version>
             <scope>test</scope>
         </dependency>
+        <!-- Add SLF4J implementation to eliminate warnings -->
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>1.4.14</version>
+        </dependency>
     </dependencies>
 
     <build>
