@@ -32,9 +32,9 @@ import java.util.List;
 import java.util.Map;
 
 public class PdfBoxMcpServer {
-    
+
     private static final ObjectMapper objectMapper = new ObjectMapper();
-    
+
     public static void main(String[] args) {
         StdioServerTransportProvider transport = new StdioServerTransportProvider();
 
@@ -62,7 +62,7 @@ public class PdfBoxMcpServer {
                 )
             )
             .build();
-        
+
         transport.setSessionFactory(new McpServerSession.Factory() {
             @Override
             public McpServerSession create(McpServerTransport serverTransport) {
@@ -77,11 +77,11 @@ public class PdfBoxMcpServer {
                 );
             }
         });
-        
+
         // Keep the server running by blocking on a never-completing mono
         Mono.never().block();
     }
-    
+
     private static McpServerSession.InitRequestHandler createInitRequestHandler() {
         return request -> {
             ServerCapabilities capabilities = new ServerCapabilities(
@@ -98,11 +98,11 @@ public class PdfBoxMcpServer {
             return Mono.just(result);
         };
     }
-    
+
     private static McpServerSession.InitNotificationHandler createInitNotificationHandler() {
         return Mono::empty;
     }
-    
+
     private static Map<String, McpServerSession.RequestHandler<?>> createRequestHandlers() {
         McpServerSession.RequestHandler<ListToolsResult> listHandler = (exchange, params) -> {
             ListToolsResult result = new ListToolsResult(
@@ -129,7 +129,7 @@ public class PdfBoxMcpServer {
             "tools/call", callHandler
         );
     }
-    
+
     private static Tool createExtractTextTool() {
         Map<String, Object> properties = Map.of(
             "file_path", new SchemaProperty("string", "Path to the PDF file"),
@@ -189,7 +189,7 @@ public class PdfBoxMcpServer {
             return Mono.just(createErrorResult("Error processing file: " + e.getMessage()));
         }
     }
-    
+
     static Mono<CallToolResult> handleExtractText(Map<String, Object> arguments) {
         String filePath = String.valueOf(arguments.get("file_path"));
         String pageRange = arguments.containsKey("page_range")
@@ -216,7 +216,7 @@ public class PdfBoxMcpServer {
             }
         });
     }
-    
+
     private static Mono<CallToolResult> handleGetMetadata(Map<String, Object> arguments) {
         String filePath = String.valueOf(arguments.get("file_path"));
 
@@ -248,7 +248,7 @@ public class PdfBoxMcpServer {
             }
         });
     }
-    
+
     private static Mono<CallToolResult> handleGetPageCount(Map<String, Object> arguments) {
         String filePath = String.valueOf(arguments.get("file_path"));
 
@@ -266,7 +266,7 @@ public class PdfBoxMcpServer {
         TextContent content = new TextContent(text);
         return new CallToolResult(List.of(content), false);
     }
-    
+
     static CallToolResult createErrorResult(String error) {
         TextContent content = new TextContent(error);
         return new CallToolResult(List.of(content), true);
