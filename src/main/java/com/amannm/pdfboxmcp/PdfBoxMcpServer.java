@@ -152,10 +152,12 @@ public class PdfBoxMcpServer {
         }
     }
     
-    private static Mono<CallToolResult> handleExtractText(Map<String, Object> arguments) {
+    static Mono<CallToolResult> handleExtractText(Map<String, Object> arguments) {
         try {
             String filePath = String.valueOf(arguments.get("file_path"));
-            String pageRange = arguments.containsKey("page_range") ? String.valueOf(arguments.get("page_range")) : "all";
+            String pageRange = arguments.containsKey("page_range")
+                ? String.valueOf(arguments.get("page_range"))
+                : "all";
             
             File pdfFile = new File(filePath);
             if (!pdfFile.exists()) {
@@ -166,10 +168,12 @@ public class PdfBoxMcpServer {
                 PDFTextStripper pdfStripper = new PDFTextStripper();
 
                 if (!"all".equals(pageRange)) {
-                    parsePageRange(pageRange).ifPresent(r -> {
-                        pdfStripper.setStartPage(r.start());
-                        pdfStripper.setEndPage(r.end());
-                    });
+                    java.util.Optional<PageRange> range = parsePageRange(pageRange);
+                    if (range.isEmpty()) {
+                        return Mono.just(createErrorResult("Invalid page range: " + pageRange));
+                    }
+                    pdfStripper.setStartPage(range.get().start());
+                    pdfStripper.setEndPage(range.get().end());
                 }
                 
                 String text = pdfStripper.getText(document);
@@ -249,11 +253,17 @@ public class PdfBoxMcpServer {
         try {
             if (parts.length == 1) {
                 int page = Integer.parseInt(parts[0]);
+                if (page < 1) {
+                    return java.util.Optional.empty();
+                }
                 return java.util.Optional.of(new PageRange(page, page));
             }
             if (parts.length == 2 && !parts[0].isBlank() && !parts[1].isBlank()) {
                 int start = Integer.parseInt(parts[0]);
                 int end = Integer.parseInt(parts[1]);
+                if (start < 1 || end < start) {
+                    return java.util.Optional.empty();
+                }
                 return java.util.Optional.of(new PageRange(start, end));
             }
         } catch (NumberFormatException e) {
